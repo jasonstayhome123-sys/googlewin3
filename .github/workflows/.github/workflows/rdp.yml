@@ -1,52 +1,55 @@
-name: Windows Remote Desktop (CRD)
+name: Windows CRD Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp:
+  build:
     runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-      - name: Download Chrome Remote Desktop
+      - name: Enable RDP (optional fallback)
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+      - name: Download CRD
         shell: pwsh
         run: |
           $url = "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
-          $output = "$env:RUNNER_TEMP\crd.msi"
-          Invoke-WebRequest $url -OutFile $output
-          Start-Process msiexec.exe -ArgumentList "/i `"$output`" /quiet /norestart" -Wait
+          $file = "$env:TEMP\crd.msi"
+          Invoke-WebRequest $url -OutFile $file
+          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$file`" /quiet /norestart"
 
-      - name: Verify Installation
+      - name: Check CRD install
         shell: pwsh
         run: |
           $path = "${env:ProgramFiles(x86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (Test-Path $path) {
-            Write-Host "CRD installed successfully"
-          } else {
-            Write-Error "CRD installation failed"
+          if (!(Test-Path $path)) {
+            Write-Error "CRD not found"
             exit 1
           }
+          Write-Host "CRD OK"
 
-      - name: Start Chrome Remote Desktop
+      - name: Start CRD Host
         shell: pwsh
         run: |
-          $authCode = "${{ secrets.CRD_AUTH_CODE }}"
-          $pin = "${{ secrets.CRD_PIN }}"
+          $code = "${{ secrets.CRD_AUTH_CODE }}"
+          $pin  = "${{ secrets.CRD_PIN }}"
           $path = "${env:ProgramFiles(x86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
-          Write-Host "Starting Chrome Remote Desktop..."
+          Write-Host "Launching CRD..."
 
-          & $path `
-            --code="$authCode" `
-            --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
-            --name="$env:COMPUTERNAME" `
-            --pin="$pin"
-
-          Write-Host "CRD started successfully"
+          Start-Process -FilePath $path -ArgumentList @(
+            "--code=$code",
+            "--redirect-url=https://remotedesktop.google.com/_/oauthredirect",
+            "--name=$env:COMPUTERNAME",
+            "--pin=$pin"
+          ) -NoNewWindow -Wait
 
       - name: Keep Alive
-        shell: pwsh
         run: |
-          Write-Host "Keeping session alive..."
-          Start-Sleep -Seconds 21600
+          echo "Runner active"
+          ping -t localhost
